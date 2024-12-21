@@ -7,6 +7,7 @@ const closeMultiLineComment = /^[\*\/]*\*+\//;
 const SourceLine = require('./SourceLine');
 const FileStorage = require('./FileStorage');
 const Clone = require('./Clone');
+var crypto = require('crypto');
 
 const DEFAULT_CHUNKSIZE=5;
 
@@ -79,7 +80,7 @@ class CloneDetector {
         return match;
     }
 
-    #filterCloneCandidates(file, compareFile) {
+    #filterCloneCandidates(file, compareFile, hashesOfChunkFromSourceFile) {
         // TODO
         // For each chunk in file.chunks, find all #chunkMatch() in compareFile.chunks
         // For each matching chunk, create a new Clone.
@@ -91,9 +92,14 @@ class CloneDetector {
         //
         // Return: file, including file.instances which is an array of Clone objects (or an empty array).
         //
-
-        file.instances = file.instances || [];        
-        file.instances = file.instances.concat(newInstances);
+        const possibleClones = compareFile.chunks.reduce((acc, chunk) => {
+            const hash = crypto.createHash('MD5').update(JSON.stringify(chunk)).digest('hex');
+            if (hashesOfChunkFromSourceFile[hash] !== undefined) {
+                acc.push(new Clone(file.name, compareFile.name, file.chunks[hashesOfChunkFromSourceFile[hash]], chunk));
+            }
+            return acc;
+        }, [])
+        file.instances = (file.instances || []).concat(possibleClones);
         return file;
     }
      
@@ -111,7 +117,25 @@ class CloneDetector {
         // Return: file, with file.instances only including Clones that have been expanded as much as they can,
         //         and not any of the Clones used during that expansion.
         //
+        file.instances = file.instances.reduce((acc, clone) => {
+            if(!acc.length) {
+                acc.push(clone);
+                return acc;
+            }
 
+            let expanded = false;
+
+            for (let i = 0; i < acc.length; i++) {
+                if (acc[i].maybeExpandWith(clone)) {
+                    expanded = true;
+                    break;
+                }
+            }
+            if (!expanded) {
+                acc.push(clone);
+            }
+            return acc;
+        }, []);
         return file;
     }
     
@@ -128,7 +152,19 @@ class CloneDetector {
         //
         // Return: file, with file.instances containing unique Clone objects that may contain several targets
         //
+        const seen = {}
 
+        file.instances.forEach((clone) => {
+            const { sourceName, sourceStart, sourceEnd } = clone;
+            const key = `${sourceName}-${sourceStart}-${sourceEnd}`;
+            if(seen[key]) {
+                seen[key].addTarget(clone);
+                return
+            }
+            seen[key] = clone;
+        })
+
+        file.instances = Object.values(seen);
         return file;
     }
     
@@ -154,6 +190,11 @@ class CloneDetector {
     }
 
     matchDetect(file) {
+        const hashesOfChunkFromSourceFile = file.chunks.reduce( (accumulator, chunk, index) => {
+            const hash = crypto.createHash('MD5').update(JSON.stringify(chunk)).digest('hex');
+            accumulator[hash] = index;
+            return accumulator;
+        }, {});
         let allFiles = this.#myFileStore.getAllFiles();
         file.instances = file.instances || [];
         for (let f of allFiles) {
@@ -170,7 +211,7 @@ class CloneDetector {
             //
             // 3. If the same clone is found in several places, consolidate them into one Clone.
             //
-            file = this.#filterCloneCandidates(file, f); 
+            file = this.#filterCloneCandidates(file, f, hashesOfChunkFromSourceFile);
             file = this.#expandCloneCandidates(file);
             file = this.#consolidateClones(file); 
         }
