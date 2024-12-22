@@ -92,6 +92,16 @@ class CloneDetector {
         //
         // Return: file, including file.instances which is an array of Clone objects (or an empty array).
         //
+        /*
+        const possibleClones = compareFile.chunks.reduce((acc, chunk) => {
+            const matchingChunk = file.chunks.find((chunkInSourceFile) => this.#chunkMatch(chunk, chunkInSourceFile));
+            if(!matchingChunk) {
+                return acc;
+            }
+            acc.push(new Clone(file.name, compareFile.name, matchingChunk, chunk));
+            return acc
+        }, [])
+        */
         const possibleClones = compareFile.chunks.reduce((acc, chunk) => {
             const hash = crypto.createHash('MD5').update(JSON.stringify(chunk)).digest('hex');
             if (hashesOfChunkFromSourceFile[hash] !== undefined) {
@@ -99,6 +109,8 @@ class CloneDetector {
             }
             return acc;
         }, [])
+
+
         file.instances = (file.instances || []).concat(possibleClones);
         return file;
     }
